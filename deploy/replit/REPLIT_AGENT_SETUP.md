@@ -103,7 +103,10 @@ After publish succeeds:
 ```bash
 curl https://brr.grapeid.org/health
 curl https://brr.grapeid.org/.well-known/brr-service.json
+node scripts/live-verify.mjs https://brr.grapeid.org
 ```
+
+`live-verify.mjs` runs the full steel thread: issuer-signed enroll → iss → rev → bulk-proof (checks `revoked_ids` + `brr_signature`). Safe to run against production — creates a new `ERegLiveVerify*` registry prefix each time. Reset DB if you want a clean slate.
 
 ## Crypto libraries (no KERI framework)
 
