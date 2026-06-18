@@ -33,9 +33,18 @@ go run ./cmd/brr
 go test ./...
 ```
 
+## Deploy targets
+
+| Target | Path | Runtime |
+|--------|------|---------|
+| Docker / Linux VPS | repo root (`go run ./cmd/brr`) | Go + SQLite |
+| Replit Autoscale | [`deploy/replit/`](deploy/replit/) | Node.js + PostgreSQL |
+
+Replit setup instructions: [`deploy/replit/REPLIT_AGENT_SETUP.md`](deploy/replit/REPLIT_AGENT_SETUP.md)
+
 ## BLOCKED
 
-- Production deploy at `brr.grapeid.org`
+- Production deploy at `brr.grapeid.org` (Go path — use Replit Node build instead)
 - KERI `vcp` enrollment validation against issuer KEL (IF9)
 - On-chain blockchain anchoring TX broadcast
 - Full keripy TEL driver integration (identity-bot side)

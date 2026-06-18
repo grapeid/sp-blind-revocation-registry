@@ -1,0 +1,11 @@
+/data/
+*.db
+.DS_Store
+/bin/
+
+deploy/replit/node_modules/
+deploy/replit/dist/
+node_modules/
+dist/
+
+brr_identity.json
