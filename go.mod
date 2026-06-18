@@ -1,4 +1,4 @@
-module github.com/grapeid/blind-revocation-registry
+module github.com/grapeid/sp-blind-revocation-registry
 
 go 1.24.0
 

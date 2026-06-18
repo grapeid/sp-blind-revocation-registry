@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/grapeid/blind-revocation-registry/internal/api"
-	"github.com/grapeid/blind-revocation-registry/internal/signer"
-	"github.com/grapeid/blind-revocation-registry/internal/store"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/api"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/signer"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/store"
 )
 
 func main() {

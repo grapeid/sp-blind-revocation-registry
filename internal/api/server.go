@@ -11,10 +11,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/grapeid/blind-revocation-registry/internal/anchor"
-	"github.com/grapeid/blind-revocation-registry/internal/merkle"
-	"github.com/grapeid/blind-revocation-registry/internal/signer"
-	"github.com/grapeid/blind-revocation-registry/internal/store"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/anchor"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/merkle"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/signer"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/store"
 )
 
 const ProtocolVersion = "1.0"

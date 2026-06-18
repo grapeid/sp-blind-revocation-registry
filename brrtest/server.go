@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/grapeid/blind-revocation-registry/internal/api"
-	"github.com/grapeid/blind-revocation-registry/internal/signer"
-	"github.com/grapeid/blind-revocation-registry/internal/store"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/api"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/signer"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/store"
 )
 
 // NewServer starts an in-process BRR for integration tests (sets BRR_DEV_SKIP_SIG).

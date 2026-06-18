@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/grapeid/blind-revocation-registry/internal/blind"
-	"github.com/grapeid/blind-revocation-registry/internal/signer"
-	"github.com/grapeid/blind-revocation-registry/internal/store"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/blind"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/signer"
+	"github.com/grapeid/sp-blind-revocation-registry/internal/store"
 )
 
 func TestBRRSteelThread(t *testing.T) {
