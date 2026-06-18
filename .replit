@@ -13,12 +13,16 @@ HOST = "0.0.0.0"
 
 [[ports]]
 localPort = 5000
+externalPort = 5000
+
+[[ports]]
+localPort = 8000
 externalPort = 80
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["sh", "-c", "cd deploy/replit && npm install && npm run build"]
-run = ["sh", "-c", "cd deploy/replit && node dist/index.js"]
+build = ["npm", "run", "build"]
+run = ["node", "dist/index.js"]
 
 [workflows]
 runButton = "Project"
@@ -38,5 +42,8 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "sh -c 'cd deploy/replit && npm install && npm run dev'"
+args = "npm run dev"
 waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
