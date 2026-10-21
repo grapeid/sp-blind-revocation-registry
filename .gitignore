@@ -3,9 +3,11 @@
 .DS_Store
 /bin/
 
-deploy/replit/node_modules/
-deploy/replit/dist/
 node_modules/
 dist/
 
 brr_identity.json
+
+# Private operating rules for coding agents — not part of the published project
+AGENTS.md
+CLAUDE.md

@@ -1,50 +1,111 @@
 # Blind Revocation Registry (BRR)
 
-Standalone M36 service — herd-private credential revocation checks without issuer contact.
+A service that lets a verifier check whether a credential has been revoked without
+the registry learning which credential is being checked, or whose it is.
 
-## Protocol
+An Identity Agent that issues credentials pushes its revocations here; an Identity
+Agent that verifies credentials fetches proofs from here and decides locally. The
+registry only ever sees opaque hashes.
 
-- Issuer pushes **blinded** entries only: `BLAKE3(credential_said || registry_salt)`
-- Registry salt is a **private ACDC attribute** — never sent to the BRR
-- Verifiers fetch **bulk subtree proofs** and finalize revocation locally
-- Blockchain anchoring is **optional** (`BRR_ANCHORING_ENABLED=true`); off by default
+This is one operator's implementation of an open protocol. Grape ID runs this code;
+anybody may run the same code, or write their own implementation of the protocol.
 
-## Run locally
+## The protocol
 
-```bash
-go run ./cmd/brr
-# default http://0.0.0.0:8093
-```
+The client side, and the protocol it speaks, are specified in the Identity Agent
+project's
+[ADR-025: Blind Revocation Registry Client](https://github.com/LF-Decentralized-Trust-labs/identity-bot/blob/main/docs/adr/025-blind-revocation-registry-client.md).
+In short:
+
+- **Blinded entries only.** The issuer pushes `BLAKE3(credential_SAID || registry_salt)`.
+  The salt is a private attribute of the credential and is never sent to the registry.
+- **Herd-private queries.** A verifier fetches a bulk proof for a whole bucket of
+  blinded ids (at least 100 leaves) and checks revocation locally, so the registry
+  cannot tell which credential it cares about.
+- **The operator cannot lie, only be unreachable.** Every proof is a sparse Merkle
+  subtree whose root the registry signs with its own key. A forged "valid" fails
+  verification.
+- **Blockchain anchoring is optional** and off by default.
 
 ## API
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/registry/enroll` | Issuer enrolls registry |
-| POST | `/registry/{prefix}/event` | Push blinded `iss`/`rev` event |
-| GET | `/registry/{prefix}/bulk-proof` | Herd-privacy subtree (C9 path) |
-| GET | `/registry/{prefix}/proof/{blinded_id}` | Utility only — **not** for verify pipeline |
-| GET | `/.well-known/brr-service.json` | Service descriptor |
+| POST | `/registry/enroll` | An issuer enrolls a registry prefix and its public key (signed) |
+| POST | `/registry/{prefix}/event` | Push a blinded `iss` or `rev` event (signed) |
+| GET | `/registry/{prefix}/bulk-proof?bucket_hint=…` | Herd-private signed subtree — what verifiers use |
+| GET | `/registry/{prefix}/proof/{blinded_id}` | Single-entry lookup. Reveals what is being checked, so verifiers must not use it |
+| GET | `/anchor/latest`, `/anchor/history` | Latest anchoring record |
+| GET | `/.well-known/brr-service.json` | Service descriptor: signing identity, protocol version, limits |
 | GET | `/health` | Liveness |
 
-## Tests
+## Two implementations
+
+The repository holds the same service in two runtimes, sharing one API and
+byte-identical hashing (golden tests in both check this).
+
+| | Go | Node.js |
+|---|---|---|
+| Source | `cmd/brr`, `internal/` | `src/` |
+| Storage | SQLite in `BRR_DATA_DIR` | PostgreSQL via `DATABASE_URL` |
+| Default port | 8093 | 5000 |
+| Container | `Dockerfile` | — |
+
+### Go
 
 ```bash
+go run ./cmd/brr          # listens on http://0.0.0.0:8093
 go test ./...
+
+docker build -t brr .
+docker run -p 8093:8093 -v brr-data:/data brr
 ```
 
-## Deploy targets
+### Node.js
 
-| Target | Path | Runtime |
-|--------|------|---------|
-| Docker / Linux VPS | repo root (`go run ./cmd/brr`) | Go + SQLite |
-| Replit Autoscale | [`deploy/replit/`](deploy/replit/) | Node.js + PostgreSQL |
+```bash
+npm ci
+npm test
+npm run build
+DATABASE_URL=postgres://user:pass@localhost/brr \
+BRR_SERVICE_IDENTITY_JSON="$(node scripts/generate-identity.mjs)" \
+npm start
+```
 
-Replit setup instructions: [`deploy/replit/REPLIT_AGENT_SETUP.md`](deploy/replit/REPLIT_AGENT_SETUP.md)
+## Configuration
 
-## BLOCKED
+| Variable | Applies to | Meaning |
+|---|---|---|
+| `PORT`, `HOST` | both | Listen address. `HOST` defaults to `0.0.0.0` |
+| `BRR_DATA_DIR` | both | Where data and the service signing identity are kept (default `./data`) |
+| `DATABASE_URL` | Node.js | PostgreSQL connection string (required) |
+| `BRR_SERVICE_IDENTITY_JSON` | Node.js | The service signing identity, from `scripts/generate-identity.mjs`. Without it a new identity is generated in `BRR_DATA_DIR` |
+| `BRR_ANCHORING_ENABLED` | both | `true` turns on anchoring records. Off by default |
+| `BRR_DEV_SKIP_SIG` | both | `true` skips issuer signature checks. **Testing only — never in production** |
 
-- Production deploy at `brr.grapeid.org` (Go path — use Replit Node build instead)
-- KERI `vcp` enrollment validation against issuer KEL (IF9)
-- On-chain blockchain anchoring TX broadcast
-- Full keripy TEL driver integration (identity-bot side)
+**Keep the service signing identity stable.** Verifiers check proofs against it. If
+it changes, every previously signed proof stops verifying. On a platform whose disk
+does not survive a restart, supply it through `BRR_SERVICE_IDENTITY_JSON` from your
+secret manager rather than letting the service generate one.
+
+## Checking a deployment
+
+```bash
+node scripts/live-verify.mjs https://your-brr.example
+```
+
+This runs the whole flow against a live registry: enroll, issue, revoke, then fetch
+a bulk proof and check the revocation is in it and signed. It creates a new
+throwaway registry prefix on each run.
+
+## Known gaps
+
+- Enrollment is not yet checked against the issuer's KERI key event log; the
+  service trusts the public key in the enrollment request.
+- Anchoring records are kept locally; nothing is broadcast to a chain.
+
+## Licence, security, contributing
+
+Apache 2.0 — see [LICENSE](LICENSE). Report vulnerabilities as described in
+[SECURITY.md](SECURITY.md). Contributions need a DCO sign-off — see
+[CONTRIBUTING.md](CONTRIBUTING.md).
