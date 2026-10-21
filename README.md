@@ -79,6 +79,7 @@ npm start
 | `PORT`, `HOST` | both | Listen address. `HOST` defaults to `0.0.0.0` |
 | `BRR_DATA_DIR` | both | Where data and the service signing identity are kept (default `./data`) |
 | `DATABASE_URL` | Node.js | PostgreSQL connection string (required) |
+| `BRR_DB_TLS_INSECURE` | Node.js | `1` skips checking a remote database's TLS certificate. Off by default; set it only for a database whose certificate no public authority signed |
 | `BRR_SERVICE_IDENTITY_JSON` | Node.js | The service signing identity, from `scripts/generate-identity.mjs`. Without it a new identity is generated in `BRR_DATA_DIR` |
 | `BRR_ANCHORING_ENABLED` | both | `true` turns on anchoring records. Off by default |
 | `BRR_DEV_SKIP_SIG` | both | `true` skips issuer signature checks. **Testing only — never in production** |

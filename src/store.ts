@@ -19,15 +19,31 @@ export interface BrrStore {
   latestAnchor(): Promise<Record<string, unknown> | null>;
 }
 
+// The database's certificate is checked, so nobody between this service and its
+// database can read or change the registry. A database on this machine needs no
+// TLS. An operator whose database presents a certificate no public authority
+// signed sets BRR_DB_TLS_INSECURE=1, deliberately and visibly.
+export function databaseTls(
+  dsn: string,
+  env: Record<string, string | undefined>,
+): undefined | { rejectUnauthorized: boolean } {
+  const host = (() => {
+    try {
+      return new URL(dsn).hostname;
+    } catch {
+      return '';
+    }
+  })();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return undefined;
+  return { rejectUnauthorized: env.BRR_DB_TLS_INSECURE !== '1' };
+}
+
 export async function openStore(): Promise<BrrStore> {
   const dsn = process.env.DATABASE_URL;
   if (!dsn) {
     throw new Error('DATABASE_URL is not set — a PostgreSQL connection string is required');
   }
-  const pool = new pg.Pool({
-    connectionString: dsn,
-    ssl: dsn.includes('localhost') ? undefined : { rejectUnauthorized: false },
-  });
+  const pool = new pg.Pool({ connectionString: dsn, ssl: databaseTls(dsn, process.env) });
   return new PostgresStore(pool);
 }
 
