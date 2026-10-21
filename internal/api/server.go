@@ -61,7 +61,6 @@ func (s *Server) handleDescriptor(w http.ResponseWriter, r *http.Request) {
 		"bulk_proofs_supported": true,
 		"min_bucket_leaves":    merkle.MinBucketLeaves,
 		"rate_limits":          map[string]int{"bulk_proofs_per_minute": 1000},
-		"note":                 "BLOCKED: production brr.grapeid.org deploy not shipped",
 	})
 }
 
@@ -190,7 +189,7 @@ func (s *Server) handleSingleProof(w http.ResponseWriter, r *http.Request) {
 	revokedFlag := merkle.IsRevoked(blindedID, revoked)
 	jsonOK(w, map[string]interface{}{
 		"registry_prefix": prefix, "blinded_id": blindedID,
-		"revoked": revokedFlag, "warning": "utility endpoint only — not for C9 verify pipeline",
+		"revoked": revokedFlag, "warning": "utility endpoint only — verifiers must use bulk-proof",
 	})
 }
 

@@ -14,7 +14,7 @@ async function main(): Promise<void> {
   const identity = await loadOrCreateIdentity(dataDir);
 
   console.log(`[brr] service AID=${identity.aid}`);
-  console.log('[brr] runtime=nodejs (Replit Autoscale)');
+  console.log('[brr] runtime=nodejs');
 
   const app = buildServer({ store, identity });
 

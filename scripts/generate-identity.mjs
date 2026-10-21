@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Generate BRR_SERVICE_IDENTITY_JSON for Replit production Secrets. */
+/** Generate a BRR_SERVICE_IDENTITY_JSON value (the service signing identity) to store in your secret manager. */
 import { ed25519 } from '@noble/curves/ed25519';
 
 const priv = ed25519.utils.randomPrivateKey();

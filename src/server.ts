@@ -31,7 +31,6 @@ export function buildServer(ctx: AppContext): FastifyInstance {
     bulk_proofs_supported: true,
     min_bucket_leaves: MIN_BUCKET_LEAVES,
     rate_limits: { bulk_proofs_per_minute: 1000 },
-    note: 'Node.js Replit Autoscale build',
   }));
 
   app.get('/anchor/latest', async () => handleAnchorLatest(ctx));
@@ -149,7 +148,7 @@ export function buildServer(ctx: AppContext): FastifyInstance {
         registry_prefix: req.params.prefix,
         blinded_id: req.params.blinded_id,
         revoked: isRevoked(req.params.blinded_id, revoked),
-        warning: 'utility endpoint only — not for C9 verify pipeline',
+        warning: 'utility endpoint only — verifiers must use bulk-proof',
       };
     },
   );

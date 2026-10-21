@@ -7,7 +7,7 @@ import (
 	"github.com/zeebo/blake3"
 )
 
-// BlindedID computes BLAKE3(credential_said || registry_salt) per M36 ARCH.
+// BlindedID computes BLAKE3(credential_said || registry_salt) per identity-bot ADR-025.
 // The BRR never receives credential_said or registry_salt — only this value.
 func BlindedID(credentialSAID, registrySalt string) string {
 	h := blake3.Sum256(append([]byte(credentialSAID), []byte(registrySalt)...))

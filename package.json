@@ -1,8 +1,9 @@
 {
-  "name": "sp-blind-revocation-registry-replit",
+  "name": "sp-blind-revocation-registry",
   "version": "1.0.0",
   "private": true,
-  "description": "M36 Blind Revocation Registry — Node.js build for Replit Autoscale",
+  "description": "Blind Revocation Registry — Node.js + PostgreSQL implementation",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "build": "tsc",

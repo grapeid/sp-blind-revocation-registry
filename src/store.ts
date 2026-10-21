@@ -22,7 +22,7 @@ export interface BrrStore {
 export async function openStore(): Promise<BrrStore> {
   const dsn = process.env.DATABASE_URL;
   if (!dsn) {
-    throw new Error('DATABASE_URL is not set — Replit PostgreSQL integration required');
+    throw new Error('DATABASE_URL is not set — a PostgreSQL connection string is required');
   }
   const pool = new pg.Pool({
     connectionString: dsn,
