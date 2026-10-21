@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 /**
  * Live BRR steel-thread: enroll → iss → rev → bulk-proof
- * Usage: node scripts/live-verify.mjs [baseUrl]
- * Default baseUrl: https://brr.grapeid.org
+ * Usage: node scripts/live-verify.mjs <baseUrl>
+ * Creates a new throwaway registry prefix on each run.
  */
 import { ed25519 } from '@noble/curves/ed25519';
 import { blake3 } from '@noble/hashes/blake3';
 
-const BRR = process.argv[2] ?? 'https://brr.grapeid.org';
+const BRR = process.argv[2];
+if (!BRR) {
+  console.error('usage: node scripts/live-verify.mjs <baseUrl>');
+  process.exit(2);
+}
 const PREFIX = 'ERegLiveVerify' + Date.now().toString(36);
 
 function marshalSorted(obj) {
