@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { anchoringEnabled } from './anchor.js';
 import { marshalSorted } from './json-canonical.js';
+import { canonicalBody } from './canonical-body.js';
 import { encode32, isRevoked, marshalProofForSigning, MerkleTree, MIN_BUCKET_LEAVES } from './merkle.js';
 import { sign, verify, type ServiceIdentity } from './signer.js';
 import type { BrrStore } from './store.js';
@@ -48,11 +49,12 @@ export function buildServer(ctx: AppContext): FastifyInstance {
     if (!registry_prefix || !issuer_aid || !issuer_public_key_b64) {
       return reply.code(400).send({ error: 'registry_prefix, issuer_aid, issuer_public_key_b64 required' });
     }
-    const canonical = marshalSorted({
-      registry_prefix,
-      issuer_aid,
-      issuer_public_key_b64,
-    });
+    let canonical: string;
+    try {
+      canonical = canonicalBody({ registry_prefix, issuer_aid, issuer_public_key_b64 });
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
     if (
       !verifyIssuerSig(issuer_public_key_b64, signature ?? '', canonical) &&
       process.env.BRR_DEV_SKIP_SIG !== 'true'
@@ -75,7 +77,7 @@ export function buildServer(ctx: AppContext): FastifyInstance {
     Body: {
       blinded_id?: string;
       event_type?: string;
-      sequence_number?: number;
+      sequence_number?: string;
       signature?: string;
     };
   }>('/registry/:prefix/event', async (req, reply) => {
@@ -83,23 +85,30 @@ export function buildServer(ctx: AppContext): FastifyInstance {
     const reg = await ctx.store.getRegistry(prefix);
     if (!reg) return reply.code(404).send({ error: 'registry not enrolled' });
 
-    const { blinded_id, event_type, sequence_number = 0, signature } = req.body ?? {};
+    const { blinded_id, event_type, sequence_number, signature } = req.body ?? {};
     if (!blinded_id || (event_type !== 'iss' && event_type !== 'rev')) {
       return reply.code(400).send({ error: 'blinded_id and event_type (iss|rev) required' });
     }
-    const canonical = marshalSorted({
-      registry_prefix: prefix,
-      blinded_id,
-      event_type,
-      sequence_number,
-    });
+    // A decimal string: every signed field is a string (ADR-049).
+    if (typeof sequence_number !== 'string' || !/^[0-9]+$/.test(sequence_number)) {
+      return reply.code(400).send({ error: 'sequence_number is a decimal string' });
+    }
+    const seq = Number(sequence_number);
+    let canonical: string;
+    try {
+      // The registry prefix is in the path and is signed too, so an event
+      // cannot be replayed into another registry.
+      canonical = canonicalBody({ registry_prefix: prefix, blinded_id, event_type, sequence_number });
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
     if (
       !verifyIssuerSig(reg.issuerPubB64, signature ?? '', canonical) &&
       process.env.BRR_DEV_SKIP_SIG !== 'true'
     ) {
       return reply.code(401).send({ error: 'issuer signature invalid' });
     }
-    await ctx.store.insertEvent(prefix, blinded_id, event_type, sequence_number);
+    await ctx.store.insertEvent(prefix, blinded_id, event_type, seq);
     const revoked = await ctx.store.revokedIds(prefix);
     const tree = new MerkleTree(revoked);
     const root = tree.root();
@@ -110,7 +119,7 @@ export function buildServer(ctx: AppContext): FastifyInstance {
       ok: true,
       merkle_root: encode32(root),
       event_type,
-      sequence_number,
+      sequence_number: seq,
     };
   });
 

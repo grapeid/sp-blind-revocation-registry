@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/grapeid/sp-blind-revocation-registry/internal/blind"
@@ -55,7 +56,7 @@ func TestBRRSteelThread(t *testing.T) {
 
 	push := func(eventType string, seq int) {
 		evBody, _ := json.Marshal(map[string]interface{}{
-			"blinded_id": blinded, "event_type": eventType, "sequence_number": seq, "signature": "dev",
+			"blinded_id": blinded, "event_type": eventType, "sequence_number": strconv.Itoa(seq), "signature": "dev",
 		})
 		r := httptest.NewRequest(http.MethodPost, "/registry/"+prefix+"/event", bytes.NewReader(evBody))
 		w := httptest.NewRecorder()

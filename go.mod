@@ -1,8 +1,9 @@
 module github.com/grapeid/sp-blind-revocation-registry
 
-go 1.24.0
+go 1.25.0
 
 require (
+	github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto v0.0.0-20261022001345-7d7ac19ad512
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/zeebo/blake3 v0.2.4
 	modernc.org/sqlite v1.46.1
@@ -11,6 +12,9 @@ require (
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/grapeid/keri-go v0.1.5 // indirect
+	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

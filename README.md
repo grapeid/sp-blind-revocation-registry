@@ -39,6 +39,14 @@ In short:
 | GET | `/.well-known/brr-service.json` | Service descriptor: signing identity, protocol version, limits |
 | GET | `/health` | Liveness |
 
+**Signed requests.** An issuer signs enrolments and events with Ed25519 in the one
+form every service-provider request uses, set by the Identity Agent's ADR-049:
+string fields of printable ASCII, keys sorted, no whitespace, no HTML escaping, the
+`signature` field left out. So `sequence_number` is a decimal string
+(`"sequence_number": "3"`). An event's signature also covers the registry prefix
+from its path, so it cannot be replayed into another registry. Both runtimes are
+tested against the published vectors in the Identity Agent's `relayproto` module.
+
 ## Two implementations
 
 The repository holds the same service in two runtimes, sharing one API and

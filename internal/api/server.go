@@ -4,11 +4,14 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/anchor"
@@ -81,7 +84,12 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "registry_prefix, issuer_aid, issuer_public_key_b64 required")
 		return
 	}
-	if err := s.verifyIssuerSig(req.IssuerPubKeyB64, req.Signature, enrollCanonical(req)); err != nil {
+	canonical, err := enrollCanonical(req)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.verifyIssuerSig(req.IssuerPubKeyB64, req.Signature, canonical); err != nil {
 		if os.Getenv("BRR_DEV_SKIP_SIG") != "true" {
 			writeErr(w, http.StatusUnauthorized, "issuer signature invalid")
 			return
@@ -104,7 +112,9 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 type eventRequest struct {
 	BlindedID      string `json:"blinded_id"`
 	EventType      string `json:"event_type"`
-	SequenceNumber int    `json:"sequence_number"`
+	// SequenceNumber is a decimal string: every signed field is a string
+	// (the Identity Agent's ADR-049).
+	SequenceNumber string `json:"sequence_number"`
 	Signature      string `json:"signature"`
 }
 
@@ -124,13 +134,23 @@ func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "blinded_id and event_type (iss|rev) required")
 		return
 	}
-	if err := s.verifyIssuerSig(reg.IssuerPubB64, req.Signature, eventCanonical(prefix, req)); err != nil {
+	seq, err := strconv.Atoi(req.SequenceNumber)
+	if err != nil || seq < 0 {
+		writeErr(w, http.StatusBadRequest, "sequence_number is a decimal string")
+		return
+	}
+	canonical, err := eventCanonical(prefix, req)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.verifyIssuerSig(reg.IssuerPubB64, req.Signature, canonical); err != nil {
 		if os.Getenv("BRR_DEV_SKIP_SIG") != "true" {
 			writeErr(w, http.StatusUnauthorized, "issuer signature invalid")
 			return
 		}
 	}
-	if err := s.Store.InsertEvent(prefix, req.BlindedID, req.EventType, req.SequenceNumber); err != nil {
+	if err := s.Store.InsertEvent(prefix, req.BlindedID, req.EventType, seq); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -142,7 +162,7 @@ func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonOK(w, map[string]interface{}{
 		"ok": true, "merkle_root": encodeRoot(root),
-		"event_type": req.EventType, "sequence_number": req.SequenceNumber,
+		"event_type": req.EventType, "sequence_number": seq,
 	})
 }
 
@@ -219,29 +239,37 @@ func (s *Server) handleAnchorHistory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) verifyIssuerSig(pubB64, sigB64 string, payload []byte) error {
 	pub, err := base64.StdEncoding.DecodeString(pubB64)
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		return err
+	if err != nil {
+		return fmt.Errorf("the issuer key is not base64")
+	}
+	// A key of the wrong length used to return no error here, which read as a
+	// verified signature.
+	if len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("the issuer key is %d bytes, not an Ed25519 key", len(pub))
 	}
 	return signer.Verify(ed25519.PublicKey(pub), payload, sigB64)
 }
 
-func enrollCanonical(req enrollRequest) []byte {
-	b, _ := json.Marshal(map[string]string{
-		"registry_prefix": req.RegistryPrefix,
-		"issuer_aid":      req.IssuerAID,
+// enrollCanonical and eventCanonical are the bytes an issuer signs: the one
+// form every service-provider request is signed in (the Identity Agent's
+// ADR-049), from relayproto.CanonicalBody. The registry prefix of an event is
+// in its path and is signed too, so an event cannot be replayed into another
+// registry.
+func enrollCanonical(req enrollRequest) ([]byte, error) {
+	return relayproto.CanonicalBody(map[string]any{
+		"registry_prefix":       req.RegistryPrefix,
+		"issuer_aid":            req.IssuerAID,
 		"issuer_public_key_b64": req.IssuerPubKeyB64,
 	})
-	return b
 }
 
-func eventCanonical(prefix string, req eventRequest) []byte {
-	b, _ := json.Marshal(map[string]interface{}{
+func eventCanonical(prefix string, req eventRequest) ([]byte, error) {
+	return relayproto.CanonicalBody(map[string]any{
 		"registry_prefix": prefix,
 		"blinded_id":      req.BlindedID,
 		"event_type":      req.EventType,
 		"sequence_number": req.SequenceNumber,
 	})
-	return b
 }
 
 func encodeRoot(root [32]byte) string {
