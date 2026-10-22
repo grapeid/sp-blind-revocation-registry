@@ -3,7 +3,7 @@ module github.com/grapeid/sp-blind-revocation-registry
 go 1.25.0
 
 require (
-	github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto v0.0.0-20261022001345-7d7ac19ad512
+	github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto v0.0.0-20261022154728-134689791b1a
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/zeebo/blake3 v0.2.4
 	modernc.org/sqlite v1.46.1
