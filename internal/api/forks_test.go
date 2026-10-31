@@ -96,3 +96,26 @@ func TestASecondRotationFromTheSameStateIsRefused(t *testing.T) {
 		t.Fatal("the registry no longer holds the log it held")
 	}
 }
+
+// A held rotation is not undone by a rotation that forks before an
+// interaction preceding it. Whoever holds the key the issuer rotated to can
+// sign another rotation from the earlier state, and its first differing event
+// is a rotation, but the held events it would replace include a rotation.
+func TestARotationAfterAnInteractionIsNotSuperseded(t *testing.T) {
+	h, st := newRegistry(t)
+	is := newIssuer(t)
+	prefix, inception := is.registry()
+	mustSend(t, h, "/registry/enroll", is.enrolment(prefix, inception))
+
+	other := is.fork()
+	is.interact()
+	is.rotate()
+	mustSend(t, h, "/registry/enroll", is.enrolment(prefix, inception))
+	other.rotate()
+	if w := send(t, h, "/registry/enroll", other.enrolment(prefix, inception)); w.Code != http.StatusConflict {
+		t.Fatalf("a rotation that would replace a held rotation gave %d, want 409", w.Code)
+	}
+	if heldLog(t, st, prefix) != is.kel() {
+		t.Fatal("the registry no longer holds the log it held")
+	}
+}

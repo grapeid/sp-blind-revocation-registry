@@ -61,12 +61,12 @@ revoke every credential in it, so an enrolment carries, besides its signature:
 
 Both are signed with the rest of the request. An enrolled registry keeps its
 issuer. Its key and log change only on a newer log that names the presented key
-and either extends the one held (the issuer rotated) or recovers from it. A
-recovery is KERI's: interaction events change no key, so whoever has taken the
-current key can append them, and the issuer answers by rotating to its
-pre-committed next key from before them. A log whose first event past the held
-log is such a rotation, and which replaces only interaction events, never a
-rotation, supersedes the held one; keri-go checks the rotation against the key
+and either extends the one held or recovers from it. A recovery is KERI's:
+interaction events change no key, so whoever has taken the current key can
+append them, and the issuer answers by rotating to its pre-committed next key
+from before them. A log whose first event that differs from the held log is
+such a rotation, and which replaces only interaction events, never a rotation,
+supersedes the held one; keri-go checks the rotation against the key
 the log committed to. A log that forks from the held one any other way is refused
 with 409, and an older copy of the held log with the same key changes nothing. A
 registry enrolled before enrolments were proven takes no events until its issuer
@@ -131,6 +131,13 @@ one throwaway registry behind on each run.
   log from before the rotation, still proves itself. Whoever holds such a key can
   enroll an issuer's registry that is not yet enrolled, until the issuer enrolls
   again with its newer log, which then wins.
+- Recovery reaches only as far as the log the registry was last sent. If the
+  issuer rotates and does not enroll the newer log, whoever holds the key it
+  rotated to can sign a different rotation from the log the registry holds,
+  which extends it and is accepted, and then rotate again to a key only they
+  hold. The issuer's real log then forks at a held rotation and is refused for
+  good. Until witness receipts are checked, an issuer must enroll every registry
+  again after every rotation.
 - Revocations pushed with a current key that was taken stay in the registry after
   the issuer recovers. Nobody can tell them apart from the issuer's own.
 - Revocations pushed under a registry enrolled before enrolments were proven stay
