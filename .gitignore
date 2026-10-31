@@ -3,9 +3,6 @@
 .DS_Store
 /bin/
 
-node_modules/
-dist/
-
 brr_identity.json
 
 # Private operating rules for coding agents — not part of the published project

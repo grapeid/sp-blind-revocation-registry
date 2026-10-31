@@ -29,8 +29,7 @@ anonymous.
 
 ## Scope
 
-In scope: the code in this repository — both the Go and the Node.js
-implementations — and anything that lets a registry operator or an observer learn
+In scope: the code in this repository, and anything that lets a registry operator or an observer learn
 which credential a verifier is checking, forge or hide a revocation, or sign as the
 service.
 

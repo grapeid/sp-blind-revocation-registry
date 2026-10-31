@@ -44,8 +44,8 @@ form every service-provider request uses, set by the Identity Agent's ADR-049:
 string fields of printable ASCII, keys sorted, no whitespace, no HTML escaping, the
 `signature` field left out. So `sequence_number` is a decimal string
 (`"sequence_number": "3"`). An event's signature also covers the registry prefix
-from its path, so it cannot be replayed into another registry. Both runtimes are
-tested against the published vectors in the Identity Agent's `relayproto` module.
+from its path, so it cannot be replayed into another registry. The form is tested
+against the published vectors in the Identity Agent's `relayproto` module.
 Keys and signatures are read by sp-common's strict decoder: qb64, or raw base64 in
 any alphabet, each with one string per value.
 
@@ -69,19 +69,9 @@ The registry's own identifier (`brr_aid`, `signed_by`) is non-transferable (code
 `B`): it is the key its proofs are signed with, so a verifier needs nothing else
 to check one.
 
-## Two implementations
+## Running it
 
-The repository holds the same service in two runtimes, sharing one API and
-byte-identical hashing (golden tests in both check this).
-
-| | Go | Node.js |
-|---|---|---|
-| Source | `cmd/brr`, `internal/` | `src/` |
-| Storage | SQLite in `BRR_DATA_DIR` | PostgreSQL via `DATABASE_URL` |
-| Default port | 8093 | 5000 |
-| Container | `Dockerfile` | — |
-
-### Go
+The service is Go, storing its data in SQLite under `BRR_DATA_DIR`.
 
 ```bash
 go run ./cmd/brr          # listens on http://0.0.0.0:8093
@@ -91,33 +81,19 @@ docker build -t brr .
 docker run -p 8093:8093 -v brr-data:/data brr
 ```
 
-### Node.js
-
-```bash
-npm ci
-npm test
-npm run build
-DATABASE_URL=postgres://user:pass@localhost/brr \
-BRR_SERVICE_IDENTITY_JSON="$(node scripts/generate-identity.mjs)" \
-npm start
-```
-
 ## Configuration
 
-| Variable | Applies to | Meaning |
-|---|---|---|
-| `PORT`, `HOST` | both | Listen address. `HOST` defaults to `0.0.0.0` |
-| `BRR_DATA_DIR` | both | Where data and the service signing identity are kept (default `./data`) |
-| `DATABASE_URL` | Node.js | PostgreSQL connection string (required) |
-| `BRR_DB_TLS_INSECURE` | Node.js | `1` skips checking a remote database's TLS certificate. Off by default; set it only for a database whose certificate no public authority signed |
-| `BRR_SERVICE_IDENTITY_JSON` | Node.js | The service signing identity, from `scripts/generate-identity.mjs`. Without it a new identity is generated in `BRR_DATA_DIR` |
-| `BRR_ANCHORING_ENABLED` | both | `true` turns on anchoring records. Off by default |
-| `BRR_DEV_SKIP_SIG` | Node.js | `true` skips issuer signature checks. **Testing only — never in production.** The Go service has no such setting |
+| Variable | Meaning |
+|---|---|
+| `PORT`, `HOST` | Listen address. `PORT` defaults to `8093`, `HOST` to `0.0.0.0` |
+| `BRR_DATA_DIR` | Where data and the service signing identity are kept (default `./data`) |
+| `BRR_ANCHORING_ENABLED` | `true` turns on anchoring records. Off by default |
+
+Nothing turns the issuer checks off.
 
 **Keep the service signing identity stable.** Verifiers check proofs against it. If
-it changes, every previously signed proof stops verifying. On a platform whose disk
-does not survive a restart, supply it through `BRR_SERVICE_IDENTITY_JSON` from your
-secret manager rather than letting the service generate one.
+it changes, every previously signed proof stops verifying. It lives in
+`BRR_DATA_DIR`, so put that on a disk that survives a restart.
 
 ## Checking a deployment
 
