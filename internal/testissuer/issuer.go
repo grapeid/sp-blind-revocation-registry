@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
@@ -84,6 +85,51 @@ func (is *Issuer) Rotate() error {
 	is.current, is.next = is.next, newNext
 	is.messages = append(is.messages, signed.Message)
 	return nil
+}
+
+// Interact appends an interaction event, signed with the current key. It
+// changes no key, so whoever holds the current key can append one. It seals a
+// fresh random digest, so two forks that each interact write different events.
+func (is *Issuer) Interact() error {
+	nonce := make([]byte, 32)
+	if _, err := rand.Read(nonce); err != nil {
+		return err
+	}
+	digest, err := keri.MatterQB64(keri.CodeBlake3_256, nonce)
+	if err != nil {
+		return err
+	}
+	seal, err := json.Marshal(map[string]string{"d": digest})
+	if err != nil {
+		return err
+	}
+	ev, err := keri.BuildInteraction(keri.InteractionInput{Prefix: is.AID, PriorSAID: is.lastSAID, SN: is.sn + 1,
+		Data: []json.RawMessage{seal}})
+	if err != nil {
+		return err
+	}
+	signed, err := keri.SignEvent(ev, is.current)
+	if err != nil {
+		return err
+	}
+	parsed, err := keri.ParseEvent(ev)
+	if err != nil {
+		return err
+	}
+	is.sn++
+	is.lastSAID = parsed.SAID
+	is.messages = append(is.messages, signed.Message)
+	return nil
+}
+
+// Fork is a copy of the issuer as it stands, holding the same keys, whose log
+// goes its own way from here: what one copy appends the other does not see.
+// It stands for whoever else holds the same keys, or for the issuer's own
+// state before events somebody else appended.
+func (is *Issuer) Fork() *Issuer {
+	cp := *is
+	cp.messages = append([][]byte(nil), is.messages...)
+	return &cp
 }
 
 // KEL is the issuer's signed key event log, a CESR stream in base64url.

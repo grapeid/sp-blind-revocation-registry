@@ -118,13 +118,15 @@ func (s *Store) Enroll(prefix, issuerAID, issuerPubB64, issuerKEL string) error 
 	return nil
 }
 
-// ReplaceIssuer moves a registry to a new issuer key and log, only if its key
-// is still heldPubB64, so two enrolments racing cannot both win.
-func (s *Store) ReplaceIssuer(prefix, heldPubB64, issuerAID, issuerPubB64, issuerKEL string) error {
+// ReplaceIssuer moves a registry to a new issuer key and log, only if it still
+// holds heldPubB64 and heldKEL, so two enrolments racing cannot both win. The
+// log is compared as well as the key: two logs can name the same key, and the
+// one a new log was checked against must be the one it replaces.
+func (s *Store) ReplaceIssuer(prefix, heldPubB64, heldKEL, issuerAID, issuerPubB64, issuerKEL string) error {
 	res, err := s.db.Exec(`
 		UPDATE registries SET issuer_aid=?, issuer_pubkey_b64=?, issuer_kel=?, status='active'
-		WHERE registry_prefix=? AND issuer_pubkey_b64=?`,
-		issuerAID, issuerPubB64, issuerKEL, prefix, heldPubB64)
+		WHERE registry_prefix=? AND issuer_pubkey_b64=? AND issuer_kel=?`,
+		issuerAID, issuerPubB64, issuerKEL, prefix, heldPubB64, heldKEL)
 	if err != nil {
 		return err
 	}

@@ -51,8 +51,13 @@ func TestAnEnrolledRegistryIsNotOverwritten(t *testing.T) {
 	if err := st.Enroll("EREG", "EMALLORY", "mallory-key", "mallory-kel"); !errors.Is(err, ErrChanged) {
 		t.Fatalf("a second enrolment gave %v", err)
 	}
-	if err := st.ReplaceIssuer("EREG", "not-the-held-key", "EALICE", "new-key", "kel2"); !errors.Is(err, ErrChanged) {
+	if err := st.ReplaceIssuer("EREG", "not-the-held-key", "alice-kel", "EALICE", "new-key", "kel2"); !errors.Is(err, ErrChanged) {
 		t.Fatalf("a replacement from a key not held gave %v", err)
+	}
+	// The same key with a log that is not the one held: whatever checked a
+	// new log against the old one checked it against a log since replaced.
+	if err := st.ReplaceIssuer("EREG", "alice-key", "a-log-since-replaced", "EALICE", "new-key", "kel2"); !errors.Is(err, ErrChanged) {
+		t.Fatalf("a replacement from a log not held gave %v", err)
 	}
 	reg, _ := st.GetRegistry("EREG")
 	if reg.IssuerAID != "EALICE" || reg.IssuerPubB64 != "alice-key" {

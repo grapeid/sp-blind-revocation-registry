@@ -106,10 +106,10 @@ const maxInceptionBytes = 16 * 1024
 //   - the registry is the issuer's (its inception event digests to the prefix
 //     and names the issuer).
 //
-// A registry already enrolled keeps its issuer. Its key changes only when the
-// issuer rotates: a newer log that extends the one held and names the new key.
-// Anything else is refused, never overwritten, which is how a registry used to
-// be taken over by anybody who enrolled it again with a key of their own.
+// A registry already enrolled keeps its issuer. Its key and log change only
+// on a log that extends the one held. Anything else is refused, never overwritten, which is how a
+// registry used to be taken over by anybody who enrolled it again with a key
+// of their own.
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	var req enrollRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
@@ -163,26 +163,39 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		// names, proving its current key, outranks that claim.
 		log.Printf("[brr] registry %s: an unproven enrolment by %q replaced by its issuer %q",
 			req.RegistryPrefix, existing.IssuerAID, req.IssuerAID)
-		err = s.Store.ReplaceIssuer(req.RegistryPrefix, existing.IssuerPubB64, req.IssuerAID, key, req.KEL)
+		err = s.Store.ReplaceIssuer(req.RegistryPrefix, existing.IssuerPubB64, existing.IssuerKEL,
+			req.IssuerAID, key, req.KEL)
 	case existing.IssuerAID != req.IssuerAID:
 		// Cannot happen while the inception binds the prefix, and is refused
 		// rather than trusted to stay impossible.
 		writeErr(w, http.StatusConflict, "this registry is enrolled to another issuer")
 		return
-	case sameKey(existing.IssuerPubB64, presented):
-		// The same key again. A newer log is kept, so a later rotation is
-		// checked against the newest.
-		if logExtends(req.KEL, existing.IssuerKEL) {
-			err = s.Store.ReplaceIssuer(req.RegistryPrefix, existing.IssuerPubB64, req.IssuerAID, key, req.KEL)
-		}
-	case logExtends(req.KEL, existing.IssuerKEL):
-		// The issuer rotated: its newer log extends the one held and names
-		// the presented key, so the key moves and the old one stops working.
-		err = s.Store.ReplaceIssuer(req.RegistryPrefix, existing.IssuerPubB64, req.IssuerAID, key, req.KEL)
 	default:
-		writeErr(w, http.StatusConflict,
-			"this registry is enrolled with a different key, and no newer key event log moves it")
-		return
+		switch compareLogs(req.KEL, existing.IssuerKEL) {
+		case logsSame, logBehind:
+			// The log held already holds every event presented. Nothing
+			// to store if the key is the one held; a key the held log has
+			// since rotated away from is refused.
+			if !sameKey(existing.IssuerPubB64, presented) {
+				writeErr(w, http.StatusConflict,
+					"this registry is enrolled with a newer key event log, which names a different key")
+				return
+			}
+		case logExtends:
+			// A newer log: it extends the one held. It names the presented
+			// key (checked above), so if the issuer rotated the key moves
+			// with it and the old one stops working.
+			err = s.Store.ReplaceIssuer(req.RegistryPrefix, existing.IssuerPubB64, existing.IssuerKEL,
+				req.IssuerAID, key, req.KEL)
+		default:
+			// Neither log extends the other: the issuer's keys have signed
+			// two histories.
+			// Storing nothing and answering with a signed receipt would
+			// tell the caller its log was taken when it was not.
+			writeErr(w, http.StatusConflict,
+				"the key event log presented forks from the one this registry holds")
+			return
+		}
 	}
 	if errors.Is(err, store.ErrChanged) {
 		writeErr(w, http.StatusConflict, "the registry changed while enrolling; try again")
@@ -258,19 +271,40 @@ func sameKey(storedB64 string, presented ed25519.PublicKey) bool {
 	return err == nil && held.Equal(presented)
 }
 
-// logExtends reports whether a presented key event log extends the one held,
+// logRelation is how a presented key event log stands to the one held.
+type logRelation int
+
+const (
+	logForks   logRelation = iota // neither holds the other
+	logsSame                      // the same events
+	logExtends                    // every held event, and more after them
+	logBehind                     // the held log has every presented event, and more
+)
+
+// compareLogs reports how a presented key event log stands to the one held,
 // by relayproto's rule: every held event, in order, compared as keri-go reads
-// them. A log that rewrites history extends nothing.
-func logExtends(presentedB64, heldB64 string) bool {
-	presented, err := decode.Base64(presentedB64)
+// them (sequence number, type and SAID), so a log that gained a receipt or
+// was re-serialised still extends the one it came from.
+func compareLogs(presentedB64, heldB64 string) logRelation {
+	presentedRaw, err := decode.Base64(presentedB64)
 	if err != nil {
-		return false
+		return logForks
 	}
-	held, err := decode.Base64(heldB64)
+	heldRaw, err := decode.Base64(heldB64)
 	if err != nil {
-		return false
+		return logForks
 	}
-	return relayproto.LogExtends(presented, held)
+	ahead := relayproto.LogExtends(presentedRaw, heldRaw)
+	behind := relayproto.LogExtends(heldRaw, presentedRaw)
+	switch {
+	case ahead && behind:
+		return logsSame
+	case ahead:
+		return logExtends
+	case behind:
+		return logBehind
+	}
+	return logForks
 }
 
 type eventRequest struct {
