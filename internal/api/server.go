@@ -223,16 +223,33 @@ func registryOf(inceptionB64, prefix, issuer string) error {
 	if ev.SAID != prefix {
 		return fmt.Errorf("the registry inception founds %s, not %s", ev.SAID, prefix)
 	}
-	var named struct {
-		Issuer string `json:"ii"`
+	named, err := issuerNamedBy(raw)
+	if err != nil {
+		return err
 	}
-	if err := json.Unmarshal(raw, &named); err != nil {
-		return fmt.Errorf("the registry inception does not parse: %w", err)
-	}
-	if named.Issuer != issuer {
-		return fmt.Errorf("the registry's issuer is %s, not %s", named.Issuer, issuer)
+	if named != issuer {
+		return fmt.Errorf("the registry's issuer is %s, not %s", named, issuer)
 	}
 	return nil
+}
+
+// issuerNamedBy reads the "ii" field of an event, by its exact name.
+//
+// Unmarshalling into a struct tagged "ii" would also take "II" or "iI", the
+// last one winning, so an event carrying both "ii" and "II" would name one
+// issuer to any KERI reader and another here. keri-go has already refused a
+// field that appears twice under one exact name; a map matches names exactly,
+// so the field read here is the field every other reader sees.
+func issuerNamedBy(raw []byte) (string, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return "", fmt.Errorf("the registry inception does not parse: %w", err)
+	}
+	var issuer string
+	if err := json.Unmarshal(fields["ii"], &issuer); err != nil || issuer == "" {
+		return "", fmt.Errorf("the registry inception names no issuer")
+	}
+	return issuer, nil
 }
 
 // sameKey compares keys as bytes: the same key in two base64 alphabets is the
