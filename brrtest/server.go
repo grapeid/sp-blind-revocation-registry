@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/grapeid/sp-blind-revocation-registry/internal/api"
-	"github.com/grapeid/sp-blind-revocation-registry/internal/signer"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/store"
+	"github.com/grapeid/sp-common/sign"
 )
 
 // NewServer starts an in-process BRR for integration tests. It checks
@@ -21,7 +21,7 @@ func NewServer(t *testing.T) *httptest.Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	id, err := signer.LoadOrCreate(filepath.Join(dir, "brr-id"))
+	id, err := sign.LoadOrCreateIdentity(filepath.Join(dir, "brr-id", "brr_identity.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

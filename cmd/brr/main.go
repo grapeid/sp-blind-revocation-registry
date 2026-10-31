@@ -4,10 +4,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/grapeid/sp-blind-revocation-registry/internal/api"
-	"github.com/grapeid/sp-blind-revocation-registry/internal/signer"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/store"
+	"github.com/grapeid/sp-common/sign"
 )
 
 func main() {
@@ -30,7 +31,7 @@ func main() {
 	}
 	defer st.Close()
 
-	id, err := signer.LoadOrCreate(dataDir)
+	id, err := sign.LoadOrCreateIdentity(filepath.Join(dataDir, "brr_identity.json"))
 	if err != nil {
 		log.Fatal(err)
 	}

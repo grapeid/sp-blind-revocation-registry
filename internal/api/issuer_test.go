@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/grapeid/sp-blind-revocation-registry/internal/signer"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/store"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/testissuer"
+	"github.com/grapeid/sp-common/sign"
 )
 
 // issuer wraps testissuer.Issuer so a test reads as the requests it sends.
@@ -87,7 +87,7 @@ func newRegistry(t *testing.T) (http.Handler, *store.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	id, err := signer.LoadOrCreate(filepath.Join(dir, "id"))
+	id, err := sign.LoadOrCreateIdentity(filepath.Join(dir, "id", "brr_identity.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

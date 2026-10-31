@@ -18,7 +18,6 @@ import (
 	keri "github.com/grapeid/keri-go"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/anchor"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/merkle"
-	"github.com/grapeid/sp-blind-revocation-registry/internal/signer"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/store"
 	"github.com/grapeid/sp-common/decode"
 	"github.com/grapeid/sp-common/sign"
@@ -29,14 +28,14 @@ const ProtocolVersion = "1.0"
 
 type Server struct {
 	Store    *store.Store
-	Identity *signer.Identity
+	Identity *sign.Identity
 	// Verifier binds an issuer's key to its identifier. Always the key event
 	// log check: there is no setting that turns it off, because whoever
 	// enrolls a registry can revoke every credential in it.
 	Verifier verify.KeyLog
 }
 
-func New(st *store.Store, id *signer.Identity) *Server {
+func New(st *store.Store, id *sign.Identity) *Server {
 	return &Server{Store: st, Identity: id}
 }
 
