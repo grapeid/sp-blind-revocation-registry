@@ -62,8 +62,8 @@ revoke every credential in it, so an enrolment carries, besides its signature:
 Both are signed with the rest of the request. An enrolled registry keeps its
 issuer. Its key changes only when the issuer rotates: enrolling again with a newer
 log that extends the one held and names the new key. Anything else is refused. A
-registry enrolled before enrolments were proven gives way to the issuer its
-inception names.
+registry enrolled before enrolments were proven takes no events until its issuer
+enrolls it again, and then gives way to the issuer its inception names.
 
 The registry's own identifier (`brr_aid`, `signed_by`) is non-transferable (code
 `B`): it is the key its proofs are signed with, so a verifier needs nothing else
@@ -109,6 +109,16 @@ one throwaway registry behind on each run.
 ## Known gaps
 
 - Anchoring records are kept locally; nothing is broadcast to a chain.
+- A key event log is checked on its own, with no witness receipts and no sense of
+  how recent it is. So a key the issuer has rotated away from, presented with the
+  log from before the rotation, still proves itself. Whoever holds such a key can
+  enroll an issuer's registry that is not yet enrolled, until the issuer enrolls
+  again with its newer log, which then wins.
+- A registry's key moves only on a log that extends the one held. Whoever holds the
+  current key can therefore extend the held log with events of their own, and a
+  recovery rotation that forks from them will not move the registry.
+- Revocations pushed under a registry enrolled before enrolments were proven stay
+  in it. Nobody can tell them apart from the issuer's own.
 
 ## Licence, security, contributing
 

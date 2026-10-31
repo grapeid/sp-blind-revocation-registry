@@ -273,6 +273,14 @@ func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "registry not enrolled")
 		return
 	}
+	// A registry enrolled before enrolments were proven holds a key nothing
+	// showed was its issuer's, so it takes no events until its issuer enrols
+	// again with its key event log and the registry's inception.
+	if reg.IssuerKEL == "" {
+		writeErr(w, http.StatusForbidden,
+			"this registry was enrolled without proof of its issuer; enroll it again with kel and registry_inception")
+		return
+	}
 	var req eventRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")

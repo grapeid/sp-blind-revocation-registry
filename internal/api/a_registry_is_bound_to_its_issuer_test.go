@@ -107,6 +107,10 @@ func TestAnUnprovenEnrolmentGivesWayToTheRegistrysIssuer(t *testing.T) {
 	if err := st.Enroll(prefix, "Esquatter", mallory.PublicKeyB64(), ""); err != nil {
 		t.Fatal(err)
 	}
+	// Until then, the unproven key cannot push anything.
+	if w := send(t, h, "/registry/"+prefix+"/event", mallory.event(prefix, "b0", "rev", "1")); w.Code != http.StatusForbidden {
+		t.Fatalf("an unproven enrolment's key pushed an event: %d", w.Code)
+	}
 	if w := send(t, h, "/registry/enroll", mallory.enrolment(prefix, inception)); w.Code == http.StatusOK {
 		t.Fatal("the squatter proved a registry that is not theirs")
 	}
