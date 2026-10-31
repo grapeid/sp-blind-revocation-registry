@@ -5,6 +5,8 @@ go 1.25.0
 require (
 	github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto v0.0.0-20261022154728-134689791b1a
 	github.com/go-chi/chi/v5 v5.2.5
+	github.com/grapeid/keri-go v0.1.5
+	github.com/grapeid/sp-common v0.0.0-20261031044116-ebcd35babcc8
 	github.com/zeebo/blake3 v0.2.4
 	modernc.org/sqlite v1.46.1
 )
@@ -13,7 +15,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/grapeid/keri-go v0.1.5 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
