@@ -76,6 +76,14 @@ The registry's own identifier (`brr_aid`, `signed_by`) is non-transferable (code
 `B`): it is the key its proofs are signed with, so a verifier needs nothing else
 to check one.
 
+**`brr_aid` changes once, on upgrading past this change.** It used to be `E`
+followed by the first 43 characters of the key's base64url, which claims to be a
+Blake3 digest and is not one, so no KERI implementation could read it. It is now
+`B` and the key itself in qb64. The key does not change, so every proof signed
+before and after verifies against the same key, but the identifier written in
+`brr_aid` and `signed_by` does. A verifier that stored the old `brr_aid` must
+replace it with the new one from `/.well-known/brr-service.json`.
+
 ## Running it
 
 The service is Go, storing its data in SQLite under `BRR_DATA_DIR`.
@@ -100,7 +108,9 @@ Nothing turns the issuer checks off.
 
 **Keep the service signing identity stable.** Verifiers check proofs against it. If
 it changes, every previously signed proof stops verifying. It lives in
-`BRR_DATA_DIR`, so put that on a disk that survives a restart.
+`BRR_DATA_DIR`, so put that on a disk that survives a restart. A
+`brr_identity.json` that exists but holds no readable key stops the service at
+start-up; it is never replaced with a new one.
 
 ## Checking a deployment
 
