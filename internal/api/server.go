@@ -4,20 +4,25 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	keri "github.com/grapeid/keri-go"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/anchor"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/merkle"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/signer"
 	"github.com/grapeid/sp-blind-revocation-registry/internal/store"
+	"github.com/grapeid/sp-common/decode"
+	"github.com/grapeid/sp-common/sign"
+	"github.com/grapeid/sp-common/verify"
 )
 
 const ProtocolVersion = "1.0"
@@ -25,6 +30,10 @@ const ProtocolVersion = "1.0"
 type Server struct {
 	Store    *store.Store
 	Identity *signer.Identity
+	// Verifier binds an issuer's key to its identifier. Always the key event
+	// log check: there is no setting that turns it off, because whoever
+	// enrolls a registry can revoke every credential in it.
+	Verifier verify.KeyLog
 }
 
 func New(st *store.Store, id *signer.Identity) *Server {
@@ -57,31 +66,66 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDescriptor(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]interface{}{
-		"brr_aid":              s.Identity.AID,
-		"protocol_version":     ProtocolVersion,
-		"anchoring_enabled":    anchor.Enabled(),
-		"anchoring_chains":     []string{},
+		"brr_aid":               s.Identity.AID,
+		"protocol_version":      ProtocolVersion,
+		"anchoring_enabled":     anchor.Enabled(),
+		"anchoring_chains":      []string{},
 		"bulk_proofs_supported": true,
-		"min_bucket_leaves":    merkle.MinBucketLeaves,
-		"rate_limits":          map[string]int{"bulk_proofs_per_minute": 1000},
+		"min_bucket_leaves":     merkle.MinBucketLeaves,
+		"rate_limits":           map[string]int{"bulk_proofs_per_minute": 1000},
 	})
 }
 
 type enrollRequest struct {
-	RegistryPrefix   string `json:"registry_prefix"`
-	IssuerAID        string `json:"issuer_aid"`
-	IssuerPubKeyB64  string `json:"issuer_public_key_b64"`
-	Signature        string `json:"signature"`
+	RegistryPrefix  string `json:"registry_prefix"`
+	IssuerAID       string `json:"issuer_aid"`
+	IssuerPubKeyB64 string `json:"issuer_public_key_b64"`
+	// KEL is the issuer's signed key event log, a CESR stream in base64url.
+	// It is what binds the key to the issuer: anybody can make a key and sign
+	// with it, and only the issuer's own log says which key speaks for it.
+	KEL string `json:"kel"`
+	// RegistryInception is the registry's inception event (vcp), in base64url.
+	// A registry's prefix is the digest of that event, and the event names its
+	// issuer, so it is what binds the prefix to the issuer.
+	RegistryInception string `json:"registry_inception"`
+	Signature         string `json:"signature"`
 }
 
+// maxInceptionBytes bounds a registry inception. One is a few hundred bytes;
+// this leaves room for a long list of backers.
+const maxInceptionBytes = 16 * 1024
+
+// handleEnroll binds a registry to its issuer, and its issuer to a key.
+//
+// Whoever holds the enrolled key can revoke every credential in the registry,
+// so the enrolment has to prove three things, and a signature proves only the
+// first:
+//
+//   - the caller holds the key presented (the request's signature);
+//   - the key is the issuer's current signing key (the issuer's key event log,
+//     checked in process by sp-common's verify);
+//   - the registry is the issuer's (its inception event digests to the prefix
+//     and names the issuer).
+//
+// A registry already enrolled keeps its issuer. Its key changes only when the
+// issuer rotates: a newer log that extends the one held and names the new key.
+// Anything else is refused, never overwritten, which is how a registry used to
+// be taken over by anybody who enrolled it again with a key of their own.
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	var req enrollRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if req.RegistryPrefix == "" || req.IssuerAID == "" || req.IssuerPubKeyB64 == "" {
-		writeErr(w, http.StatusBadRequest, "registry_prefix, issuer_aid, issuer_public_key_b64 required")
+	if req.RegistryPrefix == "" || req.IssuerAID == "" || req.IssuerPubKeyB64 == "" ||
+		req.KEL == "" || req.RegistryInception == "" {
+		writeErr(w, http.StatusBadRequest,
+			"registry_prefix, issuer_aid, issuer_public_key_b64, kel and registry_inception required")
+		return
+	}
+	presented, err := decode.Ed25519Key(req.IssuerPubKeyB64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "issuer_public_key_b64: "+err.Error())
 		return
 	}
 	canonical, err := enrollCanonical(req)
@@ -89,14 +133,64 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.verifyIssuerSig(req.IssuerPubKeyB64, req.Signature, canonical); err != nil {
-		if os.Getenv("BRR_DEV_SKIP_SIG") != "true" {
-			writeErr(w, http.StatusUnauthorized, "issuer signature invalid")
-			return
-		}
+	// First: the caller holds the key.
+	if err := sign.VerifyEd25519(req.IssuerPubKeyB64, req.Signature, canonical); err != nil {
+		writeErr(w, http.StatusUnauthorized, "issuer signature invalid: "+err.Error())
+		return
 	}
-	if err := s.Store.Enroll(req.RegistryPrefix, req.IssuerAID, req.IssuerPubKeyB64); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	// Second: the registry is the issuer's.
+	if err := registryOf(req.RegistryInception, req.RegistryPrefix, req.IssuerAID); err != nil {
+		writeErr(w, http.StatusForbidden, "could not confirm this registry belongs to that issuer: "+err.Error())
+		return
+	}
+	// Third: the key is the issuer's.
+	if result := s.Verifier.Verify(req.IssuerAID, req.KEL, req.IssuerPubKeyB64); !result.Verified {
+		writeErr(w, http.StatusForbidden, "could not confirm this key belongs to that issuer: "+result.Reason)
+		return
+	}
+
+	key := base64.StdEncoding.EncodeToString(presented)
+	existing, err := s.Store.GetRegistry(req.RegistryPrefix)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not look up the registry")
+		return
+	}
+	switch {
+	case existing == nil:
+		err = s.Store.Enroll(req.RegistryPrefix, req.IssuerAID, key, req.KEL)
+	case existing.IssuerKEL == "":
+		// Enrolled before enrolments were proven, so nothing ever showed the
+		// key held was the issuer's. The issuer the registry's own inception
+		// names, proving its current key, outranks that claim.
+		log.Printf("[brr] registry %s: an unproven enrolment by %q replaced by its issuer %q",
+			req.RegistryPrefix, existing.IssuerAID, req.IssuerAID)
+		err = s.Store.ReplaceIssuer(req.RegistryPrefix, existing.IssuerPubB64, req.IssuerAID, key, req.KEL)
+	case existing.IssuerAID != req.IssuerAID:
+		// Cannot happen while the inception binds the prefix, and is refused
+		// rather than trusted to stay impossible.
+		writeErr(w, http.StatusConflict, "this registry is enrolled to another issuer")
+		return
+	case sameKey(existing.IssuerPubB64, presented):
+		// The same key again. A newer log is kept, so a later rotation is
+		// checked against the newest.
+		if logExtends(req.KEL, existing.IssuerKEL) {
+			err = s.Store.ReplaceIssuer(req.RegistryPrefix, existing.IssuerPubB64, req.IssuerAID, key, req.KEL)
+		}
+	case logExtends(req.KEL, existing.IssuerKEL):
+		// The issuer rotated: its newer log extends the one held and names
+		// the presented key, so the key moves and the old one stops working.
+		err = s.Store.ReplaceIssuer(req.RegistryPrefix, existing.IssuerPubB64, req.IssuerAID, key, req.KEL)
+	default:
+		writeErr(w, http.StatusConflict,
+			"this registry is enrolled with a different key, and no newer key event log moves it")
+		return
+	}
+	if errors.Is(err, store.ErrChanged) {
+		writeErr(w, http.StatusConflict, "the registry changed while enrolling; try again")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not enroll the registry")
 		return
 	}
 	body, _ := json.Marshal(map[string]string{
@@ -109,9 +203,63 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// registryOf checks that a registry inception digests to prefix and names
+// issuer as the identity that governs it.
+func registryOf(inceptionB64, prefix, issuer string) error {
+	if len(inceptionB64) > base64.RawURLEncoding.EncodedLen(maxInceptionBytes)+4 {
+		return fmt.Errorf("the registry inception is larger than %d bytes", maxInceptionBytes)
+	}
+	raw, err := decode.Base64(inceptionB64)
+	if err != nil {
+		return fmt.Errorf("the registry inception is not base64: %w", err)
+	}
+	ev, err := keri.VerifyTELEvent(raw)
+	if err != nil {
+		return err
+	}
+	if ev.Ilk != "vcp" {
+		return fmt.Errorf("a %s event is not a registry inception", ev.Ilk)
+	}
+	if ev.SAID != prefix {
+		return fmt.Errorf("the registry inception founds %s, not %s", ev.SAID, prefix)
+	}
+	var named struct {
+		Issuer string `json:"ii"`
+	}
+	if err := json.Unmarshal(raw, &named); err != nil {
+		return fmt.Errorf("the registry inception does not parse: %w", err)
+	}
+	if named.Issuer != issuer {
+		return fmt.Errorf("the registry's issuer is %s, not %s", named.Issuer, issuer)
+	}
+	return nil
+}
+
+// sameKey compares keys as bytes: the same key in two base64 alphabets is the
+// same key.
+func sameKey(storedB64 string, presented ed25519.PublicKey) bool {
+	held, err := decode.Ed25519Key(storedB64)
+	return err == nil && held.Equal(presented)
+}
+
+// logExtends reports whether a presented key event log extends the one held,
+// by relayproto's rule: every held event, in order, compared as keri-go reads
+// them. A log that rewrites history extends nothing.
+func logExtends(presentedB64, heldB64 string) bool {
+	presented, err := decode.Base64(presentedB64)
+	if err != nil {
+		return false
+	}
+	held, err := decode.Base64(heldB64)
+	if err != nil {
+		return false
+	}
+	return relayproto.LogExtends(presented, held)
+}
+
 type eventRequest struct {
-	BlindedID      string `json:"blinded_id"`
-	EventType      string `json:"event_type"`
+	BlindedID string `json:"blinded_id"`
+	EventType string `json:"event_type"`
 	// SequenceNumber is a decimal string: every signed field is a string
 	// (the Identity Agent's ADR-049).
 	SequenceNumber string `json:"sequence_number"`
@@ -144,11 +292,9 @@ func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.verifyIssuerSig(reg.IssuerPubB64, req.Signature, canonical); err != nil {
-		if os.Getenv("BRR_DEV_SKIP_SIG") != "true" {
-			writeErr(w, http.StatusUnauthorized, "issuer signature invalid")
-			return
-		}
+	if err := sign.VerifyEd25519(reg.IssuerPubB64, req.Signature, canonical); err != nil {
+		writeErr(w, http.StatusUnauthorized, "issuer signature invalid: "+err.Error())
+		return
 	}
 	if err := s.Store.InsertEvent(prefix, req.BlindedID, req.EventType, seq); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -217,7 +363,7 @@ func (s *Server) handleAnchorLatest(w http.ResponseWriter, r *http.Request) {
 	if !anchor.Enabled() {
 		jsonOK(w, map[string]interface{}{
 			"anchoring_enabled": false,
-			"note": "anchoring not enabled — registry tamper-evident via KERI receipts",
+			"note":              "anchoring not enabled — registry tamper-evident via KERI receipts",
 		})
 		return
 	}
@@ -237,19 +383,6 @@ func (s *Server) handleAnchorHistory(w http.ResponseWriter, r *http.Request) {
 	s.handleAnchorLatest(w, r)
 }
 
-func (s *Server) verifyIssuerSig(pubB64, sigB64 string, payload []byte) error {
-	pub, err := base64.StdEncoding.DecodeString(pubB64)
-	if err != nil {
-		return fmt.Errorf("the issuer key is not base64")
-	}
-	// A key of the wrong length used to return no error here, which read as a
-	// verified signature.
-	if len(pub) != ed25519.PublicKeySize {
-		return fmt.Errorf("the issuer key is %d bytes, not an Ed25519 key", len(pub))
-	}
-	return signer.Verify(ed25519.PublicKey(pub), payload, sigB64)
-}
-
 // enrollCanonical and eventCanonical are the bytes an issuer signs: the one
 // form every service-provider request is signed in (the Identity Agent's
 // ADR-049), from relayproto.CanonicalBody. The registry prefix of an event is
@@ -260,6 +393,8 @@ func enrollCanonical(req enrollRequest) ([]byte, error) {
 		"registry_prefix":       req.RegistryPrefix,
 		"issuer_aid":            req.IssuerAID,
 		"issuer_public_key_b64": req.IssuerPubKeyB64,
+		"kel":                   req.KEL,
+		"registry_inception":    req.RegistryInception,
 	})
 }
 

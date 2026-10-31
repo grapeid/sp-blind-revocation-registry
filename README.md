@@ -31,7 +31,7 @@ In short:
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/registry/enroll` | An issuer enrolls a registry prefix and its public key (signed) |
+| POST | `/registry/enroll` | An issuer enrolls a registry, proving the registry and the key are its own (signed) |
 | POST | `/registry/{prefix}/event` | Push a blinded `iss` or `rev` event (signed) |
 | GET | `/registry/{prefix}/bulk-proof?bucket_hint=…` | Herd-private signed subtree — what verifiers use |
 | GET | `/registry/{prefix}/proof/{blinded_id}` | Single-entry lookup. Reveals what is being checked, so verifiers must not use it |
@@ -46,6 +46,28 @@ string fields of printable ASCII, keys sorted, no whitespace, no HTML escaping, 
 (`"sequence_number": "3"`). An event's signature also covers the registry prefix
 from its path, so it cannot be replayed into another registry. Both runtimes are
 tested against the published vectors in the Identity Agent's `relayproto` module.
+Keys and signatures are read by sp-common's strict decoder: qb64, or raw base64 in
+any alphabet, each with one string per value.
+
+**Enrolment is proven, not trusted.** Whoever holds a registry's enrolled key can
+revoke every credential in it, so an enrolment carries, besides its signature:
+
+- `kel`: the issuer's signed key event log (a CESR stream, base64url). The registry
+  checks it in process with keri-go, through sp-common's `verify`: it must derive
+  `issuer_aid` and name `issuer_public_key_b64` as the current signing key.
+- `registry_inception`: the registry's inception event (`vcp`, base64url). It must
+  digest to `registry_prefix` and name `issuer_aid` as its issuer, so nobody else
+  can enroll the registry first.
+
+Both are signed with the rest of the request. An enrolled registry keeps its
+issuer. Its key changes only when the issuer rotates: enrolling again with a newer
+log that extends the one held and names the new key. Anything else is refused. A
+registry enrolled before enrolments were proven gives way to the issuer its
+inception names.
+
+The registry's own identifier (`brr_aid`, `signed_by`) is non-transferable (code
+`B`): it is the key its proofs are signed with, so a verifier needs nothing else
+to check one.
 
 ## Two implementations
 
@@ -90,7 +112,7 @@ npm start
 | `BRR_DB_TLS_INSECURE` | Node.js | `1` skips checking a remote database's TLS certificate. Off by default; set it only for a database whose certificate no public authority signed |
 | `BRR_SERVICE_IDENTITY_JSON` | Node.js | The service signing identity, from `scripts/generate-identity.mjs`. Without it a new identity is generated in `BRR_DATA_DIR` |
 | `BRR_ANCHORING_ENABLED` | both | `true` turns on anchoring records. Off by default |
-| `BRR_DEV_SKIP_SIG` | both | `true` skips issuer signature checks. **Testing only — never in production** |
+| `BRR_DEV_SKIP_SIG` | Node.js | `true` skips issuer signature checks. **Testing only — never in production.** The Go service has no such setting |
 
 **Keep the service signing identity stable.** Verifiers check proofs against it. If
 it changes, every previously signed proof stops verifying. On a platform whose disk
@@ -100,17 +122,16 @@ secret manager rather than letting the service generate one.
 ## Checking a deployment
 
 ```bash
-node scripts/live-verify.mjs https://your-brr.example
+go run ./cmd/live-verify https://your-brr.example
 ```
 
-This runs the whole flow against a live registry: enroll, issue, revoke, then fetch
-a bulk proof and check the revocation is in it and signed. It creates a new
-throwaway registry prefix on each run.
+This runs the whole flow against a live registry: a new KERI issuer founds and
+enrolls a registry, issues and revokes a credential, then fetches a bulk proof and
+checks the revocation is in it and signed by the registry's identifier. It leaves
+one throwaway registry behind on each run.
 
 ## Known gaps
 
-- Enrollment is not yet checked against the issuer's KERI key event log; the
-  service trusts the public key in the enrollment request.
 - Anchoring records are kept locally; nothing is broadcast to a chain.
 
 ## Licence, security, contributing

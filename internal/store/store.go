@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -69,6 +70,18 @@ CREATE TABLE IF NOT EXISTS anchor_log (
     note TEXT
 );
 `)
+	if err != nil {
+		return err
+	}
+	// issuer_kel arrived with enrolments proven against the issuer's key event
+	// log. A registry enrolled before has none, and is told apart by that.
+	var has int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('registries') WHERE name='issuer_kel'`).Scan(&has); err != nil {
+		return err
+	}
+	if has == 0 {
+		_, err = s.db.Exec(`ALTER TABLE registries ADD COLUMN issuer_kel TEXT NOT NULL DEFAULT ''`)
+	}
 	return err
 }
 
@@ -76,29 +89,57 @@ type Registry struct {
 	Prefix       string
 	IssuerAID    string
 	IssuerPubB64 string
-	LastSyncSeq  int
-	Status       string
+	// IssuerKEL is the issuer's key event log the enrolment was proven with,
+	// base64url. Empty for a registry enrolled before enrolments were proven.
+	IssuerKEL   string
+	LastSyncSeq int
+	Status      string
 }
 
-func (s *Store) Enroll(prefix, issuerAID, issuerPubB64 string) error {
+// ErrChanged reports that a registry was enrolled, or its issuer changed,
+// between reading it and writing it.
+var ErrChanged = errors.New("the registry changed while enrolling")
+
+// Enroll records a new registry. It never replaces one: an enrolled
+// registry's issuer changes only through ReplaceIssuer.
+func (s *Store) Enroll(prefix, issuerAID, issuerPubB64, issuerKEL string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`
-		INSERT INTO registries (registry_prefix, issuer_aid, issuer_pubkey_b64, enrolled_at, status)
-		VALUES (?, ?, ?, ?, 'active')
-		ON CONFLICT(registry_prefix) DO UPDATE SET
-			issuer_aid=excluded.issuer_aid,
-			issuer_pubkey_b64=excluded.issuer_pubkey_b64,
-			status='active'`,
-		prefix, issuerAID, issuerPubB64, now)
-	return err
+	res, err := s.db.Exec(`
+		INSERT INTO registries (registry_prefix, issuer_aid, issuer_pubkey_b64, issuer_kel, enrolled_at, status)
+		VALUES (?, ?, ?, ?, ?, 'active')
+		ON CONFLICT(registry_prefix) DO NOTHING`,
+		prefix, issuerAID, issuerPubB64, issuerKEL, now)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrChanged
+	}
+	return nil
+}
+
+// ReplaceIssuer moves a registry to a new issuer key and log, only if its key
+// is still heldPubB64, so two enrolments racing cannot both win.
+func (s *Store) ReplaceIssuer(prefix, heldPubB64, issuerAID, issuerPubB64, issuerKEL string) error {
+	res, err := s.db.Exec(`
+		UPDATE registries SET issuer_aid=?, issuer_pubkey_b64=?, issuer_kel=?, status='active'
+		WHERE registry_prefix=? AND issuer_pubkey_b64=?`,
+		issuerAID, issuerPubB64, issuerKEL, prefix, heldPubB64)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrChanged
+	}
+	return nil
 }
 
 func (s *Store) GetRegistry(prefix string) (*Registry, error) {
 	var r Registry
 	err := s.db.QueryRow(`
-		SELECT registry_prefix, issuer_aid, issuer_pubkey_b64, last_sync_seq, status
+		SELECT registry_prefix, issuer_aid, issuer_pubkey_b64, issuer_kel, last_sync_seq, status
 		FROM registries WHERE registry_prefix=?`, prefix).
-		Scan(&r.Prefix, &r.IssuerAID, &r.IssuerPubB64, &r.LastSyncSeq, &r.Status)
+		Scan(&r.Prefix, &r.IssuerAID, &r.IssuerPubB64, &r.IssuerKEL, &r.LastSyncSeq, &r.Status)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
