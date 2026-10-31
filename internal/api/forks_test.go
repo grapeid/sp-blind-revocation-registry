@@ -67,7 +67,8 @@ func TestAnOlderLogWithTheSameKeyIsAcceptedAndChangesNothing(t *testing.T) {
 
 // Two rotations from one state are two histories signed by the same
 // pre-committed key; the registry keeps the one it has and refuses the other,
-// whichever key it names.
+// whichever key it names. A recovery supersedes interaction events, never a
+// rotation.
 func TestASecondRotationFromTheSameStateIsRefused(t *testing.T) {
 	h, st := newRegistry(t)
 	is := newIssuer(t)

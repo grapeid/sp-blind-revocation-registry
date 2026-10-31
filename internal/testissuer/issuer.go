@@ -132,6 +132,19 @@ func (is *Issuer) Fork() *Issuer {
 	return &cp
 }
 
+// StealCurrentKey is a fork holding the issuer's current key and not its
+// pre-committed next one, which it replaces with a key of its own: whoever
+// took the current key. Its rotations name a key the log never committed to.
+func (is *Issuer) StealCurrentKey() (*Issuer, error) {
+	own, err := keri.GenerateSigner(true)
+	if err != nil {
+		return nil, err
+	}
+	cp := is.Fork()
+	cp.next = own
+	return cp, nil
+}
+
 // KEL is the issuer's signed key event log, a CESR stream in base64url.
 func (is *Issuer) KEL() (string, error) {
 	out, err := keri.ExportKEL(is.messages)

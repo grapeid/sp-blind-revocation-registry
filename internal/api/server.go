@@ -107,7 +107,8 @@ const maxInceptionBytes = 16 * 1024
 //     and names the issuer).
 //
 // A registry already enrolled keeps its issuer. Its key and log change only
-// on a log that extends the one held. Anything else is refused, never overwritten, which is how a
+// on a log that extends the one held, or that recovers from it (see
+// compareLogs). Anything else is refused, never overwritten, which is how a
 // registry used to be taken over by anybody who enrolled it again with a key
 // of their own.
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
@@ -181,19 +182,19 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 					"this registry is enrolled with a newer key event log, which names a different key")
 				return
 			}
-		case logExtends:
-			// A newer log: it extends the one held. It names the presented
-			// key (checked above), so if the issuer rotated the key moves
-			// with it and the old one stops working.
+		case logExtends, logSupersedes:
+			// A newer log: it extends the one held, or recovers from it
+			// with a rotation. It names the presented key (checked above),
+			// so the key moves with it and the old one stops working.
 			err = s.Store.ReplaceIssuer(req.RegistryPrefix, existing.IssuerPubB64, existing.IssuerKEL,
 				req.IssuerAID, key, req.KEL)
 		default:
-			// Neither log extends the other: the issuer's keys have signed
-			// two histories.
+			// Neither log extends the other and the presented one is not
+			// a recovery: the issuer's keys have signed two histories.
 			// Storing nothing and answering with a signed receipt would
 			// tell the caller its log was taken when it was not.
 			writeErr(w, http.StatusConflict,
-				"the key event log presented forks from the one this registry holds")
+				"the key event log presented forks from the one this registry holds, and does not recover from it")
 			return
 		}
 	}
@@ -275,16 +276,37 @@ func sameKey(storedB64 string, presented ed25519.PublicKey) bool {
 type logRelation int
 
 const (
-	logForks   logRelation = iota // neither holds the other
-	logsSame                      // the same events
-	logExtends                    // every held event, and more after them
-	logBehind                     // the held log has every presented event, and more
+	logForks      logRelation = iota // neither holds the other, and no recovery
+	logsSame                         // the same events
+	logExtends                       // every held event, and more after them
+	logBehind                        // the held log has every presented event, and more
+	logSupersedes                    // a recovery rotation replacing held interaction events
 )
 
-// compareLogs reports how a presented key event log stands to the one held,
-// by relayproto's rule: every held event, in order, compared as keri-go reads
-// them (sequence number, type and SAID), so a log that gained a receipt or
-// was re-serialised still extends the one it came from.
+// compareLogs reports how a presented key event log stands to the one held.
+//
+// Extending is relayproto's rule: every held event, in order, compared as
+// keri-go reads them (sequence number, type and SAID), so a log that gained a
+// receipt or was re-serialised still extends the one it came from.
+//
+// Superseding is KERI's recovery. Interaction events change no key, so
+// whoever holds the current signing key can append them, and an issuer whose
+// current key was taken recovers by rotating to its pre-committed next key
+// from before them. That rotation sits at a sequence number the held log has
+// already used, so the presented log extends nothing, and without this rule
+// the registry would stay with the log whoever took the key wrote. It is
+// accepted only as KERI accepts it:
+//
+//   - the two logs agree up to some event, and then differ;
+//   - the presented log's first different event is a rotation;
+//   - every held event after the fork is an interaction. A rotation is never
+//     superseded, so a held rotation is never undone this way.
+//
+// That the rotation is the issuer's is not decided here. The presented log
+// has already been verified whole by keri-go (verify.KeyLog), which checks the
+// rotation's keys against the next-key digests of the establishment event
+// before it. That event is in the shared part, and so is the held log's last
+// establishment event too: it is the state the rotation is checked against.
 func compareLogs(presentedB64, heldB64 string) logRelation {
 	presentedRaw, err := decode.Base64(presentedB64)
 	if err != nil {
@@ -304,7 +326,61 @@ func compareLogs(presentedB64, heldB64 string) logRelation {
 	case behind:
 		return logBehind
 	}
+	if supersedes(presentedRaw, heldRaw) {
+		return logSupersedes
+	}
 	return logForks
+}
+
+// supersedes reports whether presented recovers from held by a rotation that
+// replaces only interaction events. See compareLogs.
+func supersedes(presentedRaw, heldRaw []byte) bool {
+	presented, err := logEventsOf(presentedRaw)
+	if err != nil {
+		return false
+	}
+	held, err := logEventsOf(heldRaw)
+	if err != nil {
+		return false
+	}
+	fork := 0
+	for fork < len(presented) && fork < len(held) && sameEvent(presented[fork], held[fork]) {
+		fork++
+	}
+	// The inception names the identifier, so a fork at the first event is
+	// another identity's log; a fork past the end of either is not a fork.
+	if fork == 0 || fork >= len(presented) || fork >= len(held) {
+		return false
+	}
+	if presented[fork].Ilk != "rot" || presented[fork].SN != held[fork].SN {
+		return false
+	}
+	for _, ev := range held[fork:] {
+		if ev.Ilk != "ixn" {
+			return false
+		}
+	}
+	return true
+}
+
+func sameEvent(a, b *keri.Event) bool {
+	return a.SN == b.SN && a.Ilk == b.Ilk && a.SAID == b.SAID
+}
+
+func logEventsOf(stream []byte) ([]*keri.Event, error) {
+	messages, err := keri.ParseKELStream(stream)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*keri.Event, 0, len(messages))
+	for _, m := range messages {
+		ev, err := keri.ParseEvent(m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, nil
 }
 
 type eventRequest struct {

@@ -60,8 +60,15 @@ revoke every credential in it, so an enrolment carries, besides its signature:
   can enroll the registry first.
 
 Both are signed with the rest of the request. An enrolled registry keeps its
-issuer. Its key changes only when the issuer rotates: enrolling again with a newer
-log that extends the one held and names the new key. Anything else is refused. A
+issuer. Its key and log change only on a newer log that names the presented key
+and either extends the one held (the issuer rotated) or recovers from it. A
+recovery is KERI's: interaction events change no key, so whoever has taken the
+current key can append them, and the issuer answers by rotating to its
+pre-committed next key from before them. A log whose first event past the held
+log is such a rotation, and which replaces only interaction events, never a
+rotation, supersedes the held one; keri-go checks the rotation against the key
+the log committed to. A log that forks from the held one any other way is refused
+with 409, and an older copy of the held log with the same key changes nothing. A
 registry enrolled before enrolments were proven takes no events until its issuer
 enrolls it again, and then gives way to the issuer its inception names.
 
@@ -114,9 +121,8 @@ one throwaway registry behind on each run.
   log from before the rotation, still proves itself. Whoever holds such a key can
   enroll an issuer's registry that is not yet enrolled, until the issuer enrolls
   again with its newer log, which then wins.
-- A registry's key moves only on a log that extends the one held. Whoever holds the
-  current key can therefore extend the held log with events of their own, and a
-  recovery rotation that forks from them will not move the registry.
+- Revocations pushed with a current key that was taken stay in the registry after
+  the issuer recovers. Nobody can tell them apart from the issuer's own.
 - Revocations pushed under a registry enrolled before enrolments were proven stay
   in it. Nobody can tell them apart from the issuer's own.
 
